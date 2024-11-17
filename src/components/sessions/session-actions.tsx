@@ -19,6 +19,7 @@ import {
   Eye,
   PlayCircle,
   StopCircle,
+  BarChart2,
 } from "lucide-react"
 import {
   AlertDialog,
@@ -32,7 +33,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useState } from "react"
 import { useSessionStore } from "@/store/session-store"
-import { Session } from "@/types/session"
+import type { Session } from "@/types/session"
 import { useToast } from "@/hooks/use-toast"
 
 interface SessionActionsProps {
@@ -44,7 +45,13 @@ export function SessionActions({ session }: SessionActionsProps) {
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
-  const { updateSession, deleteSession, duplicateSession } = useSessionStore()
+  const { 
+    updateSession, 
+    deleteSession, 
+    duplicateSession, 
+    archiveSession, 
+    unarchiveSession 
+  } = useSessionStore()
 
   const handleStatusChange = async (newStatus: Session['status']) => {
     try {
@@ -88,15 +95,23 @@ export function SessionActions({ session }: SessionActionsProps) {
   const handleArchive = async () => {
     try {
       setIsLoading(true)
-      await updateSession(session.id, { archived: true })
-      toast({
-        title: "Session archived",
-        description: "Session moved to archives",
-      })
+      if (session.archived) {
+        await unarchiveSession(session.id)
+        toast({
+          title: "Session unarchived",
+          description: "Session has been restored",
+        })
+      } else {
+        await archiveSession(session.id)
+        toast({
+          title: "Session archived",
+          description: "Session has been archived",
+        })
+      }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to archive session",
+        description: `Failed to ${session.archived ? 'unarchive' : 'archive'} session`,
         variant: "destructive",
       })
     } finally {
@@ -110,7 +125,7 @@ export function SessionActions({ session }: SessionActionsProps) {
       await deleteSession(session.id)
       toast({
         title: "Session deleted",
-        description: "Session permanently removed",
+        description: "Session has been permanently deleted",
       })
     } catch (error) {
       toast({
@@ -134,18 +149,18 @@ export function SessionActions({ session }: SessionActionsProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-        <DropdownMenuItem
-  onClick={() => router.push(`/dashboard/sessions/${session.id}/edit`)}
->
-  <Pencil className="mr-2 h-4 w-4" /> Edit
-</DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => router.push(`/dashboard/sessions/${session.id}/edit`)}
+          >
+            <Pencil className="mr-2 h-4 w-4" /> Edit
+          </DropdownMenuItem>
           {session.status === 'draft' && (
-  <DropdownMenuItem
-    onClick={() => router.push(`/dashboard/sessions/${session.id}/preview`)}
-  >
-    <Eye className="mr-2 h-4 w-4" /> Preview
-  </DropdownMenuItem>
-)}
+            <DropdownMenuItem 
+              onClick={() => router.push(`/dashboard/sessions/${session.id}/preview`)}
+            >
+              <Eye className="mr-2 h-4 w-4" /> Preview
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={handleDuplicate}>
             <Copy className="mr-2 h-4 w-4" /> Duplicate
           </DropdownMenuItem>
@@ -160,8 +175,16 @@ export function SessionActions({ session }: SessionActionsProps) {
               <StopCircle className="mr-2 h-4 w-4" /> End Session
             </DropdownMenuItem>
           )}
+          {session.status === 'completed' && (
+            <DropdownMenuItem
+              onClick={() => router.push(`/dashboard/sessions/${session.id}/results`)}
+            >
+              <BarChart2 className="mr-2 h-4 w-4" /> View Results
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={handleArchive}>
-            <Archive className="mr-2 h-4 w-4" /> Archive
+            <Archive className="mr-2 h-4 w-4" />
+            {session.archived ? 'Unarchive' : 'Archive'}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem 

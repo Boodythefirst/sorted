@@ -6,25 +6,42 @@ import {
   where,
   getDocs,
   addDoc,
-  serverTimestamp, 
+  serverTimestamp,
   updateDoc,
-  doc
+  doc 
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { ParticipantSession, ParticipantSort, Session } from '@/types/session';
+import { Session, ParticipantSort, Category } from '@/types/session';
 
-interface ParticipantStore {
+interface ParticipantSession {
+  title: ReactNode;
+  description: ReactNode;
+  id: string;
+  sessionId: string;
+  startedAt: string;
+  completedAt?: string;
+  cards: Session['cards'];
+  categories: Category[];
+  type: Session['type'];
+  allowNewCategories: boolean;
+}
+
+interface ParticipantState {
   currentSession: ParticipantSession | null;
   isLoading: boolean;
   error: string | null;
+  customCategories: Category[];
   joinSession: (code: string) => Promise<void>;
   submitSort: (sort: Omit<ParticipantSort, 'id'>) => Promise<void>;
+  addCustomCategory: (category: Category) => void;
+  removeCustomCategory: (categoryId: string) => void;
 }
 
-export const useParticipantStore = create<ParticipantStore>((set, get) => ({
+export const useParticipantStore = create<ParticipantState>((set, get) => ({
   currentSession: null,
   isLoading: false,
   error: null,
+  customCategories: [],
 
   joinSession: async (code: string) => {
     try {
@@ -52,6 +69,8 @@ export const useParticipantStore = create<ParticipantStore>((set, get) => ({
         startedAt: new Date().toISOString(),
         cards: sessionData.cards,
         categories: sessionData.categories,
+        type: sessionData.type,
+        allowNewCategories: sessionData.type !== 'closed'
       };
 
       const participantSessionRef = await addDoc(
@@ -67,6 +86,7 @@ export const useParticipantStore = create<ParticipantStore>((set, get) => ({
           id: participantSessionRef.id,
           ...participantSession,
         },
+        customCategories: [],
         isLoading: false,
       });
     } catch (error) {
@@ -75,30 +95,64 @@ export const useParticipantStore = create<ParticipantStore>((set, get) => ({
     }
   },
 
-
   submitSort: async (sort) => {
     try {
       set({ isLoading: true, error: null });
-      console.log('Submitting sort:', sort) // Debug log
       
-      const sortRef = await addDoc(collection(db, 'participant_sorts'), {
+      // Combine predefined and custom categories
+      const currentSession = get().currentSession;
+      const customCategories = get().customCategories;
+      
+      if (!currentSession) {
+        throw new Error('No active session');
+      }
+
+      // Add custom categories to the sort data if any
+      const sortWithCustomCategories = {
         ...sort,
+        categories: [
+          ...sort.categories,
+          ...customCategories.map(category => ({
+            id: category.id,
+            name: category.name,
+            cardIds: category.cards.map(card => card.id)
+          }))
+        ]
+      };
+
+      await addDoc(collection(db, 'participant_sorts'), {
+        ...sortWithCustomCategories,
         completedAt: serverTimestamp(),
       });
-      console.log('Sort submitted with ID:', sortRef.id) // Debug log
-  
+
       // Update participant session
-      if (get().currentSession) {
-        await updateDoc(doc(db, 'participant_sessions', get().currentSession.id), {
-          completedAt: serverTimestamp(),
-        });
-      }
-  
-      set({ currentSession: null, isLoading: false });
+      await updateDoc(doc(db, 'participant_sessions', currentSession.id), {
+        completedAt: serverTimestamp(),
+        customCategories: customCategories
+      });
+
+      set({ currentSession: null, customCategories: [], isLoading: false });
     } catch (error) {
-      console.error('Error submitting sort:', error) // Debug log
       set({ error: (error as Error).message, isLoading: false });
       throw error;
     }
+  },
+
+  addCustomCategory: (category: Category) => {
+    const currentSession = get().currentSession;
+    
+    if (!currentSession || !currentSession.allowNewCategories) {
+      return;
+    }
+
+    set(state => ({
+      customCategories: [...state.customCategories, category]
+    }));
+  },
+
+  removeCustomCategory: (categoryId: string) => {
+    set(state => ({
+      customCategories: state.customCategories.filter(c => c.id !== categoryId)
+    }));
   },
 }));

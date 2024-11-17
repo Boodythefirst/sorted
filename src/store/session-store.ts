@@ -14,34 +14,42 @@ import {
   Timestamp 
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { SessionStore, Session } from '@/types/session';
+import { Session } from '@/types/session';
 import { useAuthStore } from './auth-store';
+
+interface FilterState {
+  search: string;
+  status: string;
+  showArchived: boolean;
+}
 
 interface SessionState {
   sessions: Session[];
   filteredSessions: Session[];
   isLoading: boolean;
   error: string | null;
-  filter: {
-    search: string;
-    status: string;
-  };
+  filter: FilterState;
   createSession: (session: Omit<Session, 'id' | 'createdAt' | 'code'>) => Promise<void>;
   updateSession: (id: string, session: Partial<Session>) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   fetchSessions: () => Promise<void>;
-  setFilter: (filter: { search: string; status: string }) => void;
+  setFilter: (filter: Partial<FilterState>) => void;
   duplicateSession: (sessionId: string) => Promise<Session>;
+  archiveSession: (id: string) => Promise<void>;
+  unarchiveSession: (id: string) => Promise<void>;
 }
+
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
-  filteredSessions: [], // This will be set when fetching sessions
+  filteredSessions: [],
   isLoading: false,
   error: null,
   filter: {
     search: "",
     status: "all",
+    showArchived: false,
   },
+
   createSession: async (sessionData) => {
     try {
       set({ isLoading: true, error: null });
@@ -49,7 +57,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       
       if (!user) throw new Error('User not authenticated');
 
-      // Generate a random 6-digit code
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       
       const newSession = {
@@ -58,6 +65,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         createdBy: user.id,
         createdAt: serverTimestamp(),
         participantCount: 0,
+        archived: false,
       };
 
       const docRef = await addDoc(collection(db, 'sessions'), newSession);
@@ -133,10 +141,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         };
       }) as Session[];
 
-      // Set both sessions and filteredSessions initially
+      const currentFilter = get().filter;
+      const filteredSessions = applyFilters(sessions, currentFilter);
+
       set({ 
-        sessions, 
-        filteredSessions: sessions, // Initialize filteredSessions with all sessions
+        sessions,
+        filteredSessions,
         isLoading: false 
       });
     } catch (error) {
@@ -145,35 +155,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  setFilter: (filter) => {
-    set({ filter });
-    const { sessions } = get();
+  setFilter: (newFilter) => {
+    const currentFilter = get().filter;
+    const updatedFilter = { ...currentFilter, ...newFilter };
+    const sessions = get().sessions;
     
-    // If no filter is applied, show all sessions
-    if (filter.status === "all" && !filter.search) {
-      set({ filteredSessions: sessions });
-      return;
-    }
+    const filteredSessions = applyFilters(sessions, updatedFilter);
 
-    const filteredSessions = sessions.filter(session => {
-      // Status filter
-      if (filter.status !== "all" && session.status !== filter.status) {
-        return false;
-      }
-
-      // Search filter
-      if (filter.search) {
-        const searchLower = filter.search.toLowerCase();
-        return (
-          session.title.toLowerCase().includes(searchLower) ||
-          session.description.toLowerCase().includes(searchLower) ||
-          session.code.toLowerCase().includes(searchLower)
-        );
-      }
-
-      return true;
+    set({ 
+      filter: updatedFilter,
+      filteredSessions 
     });
-    set({ filteredSessions });
   },
 
   duplicateSession: async (sessionId) => {
@@ -194,6 +186,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         code: Math.random().toString(36).substring(2, 8).toUpperCase(),
         createdAt: serverTimestamp(),
         participantCount: 0,
+        archived: false,
       };
 
       const docRef = await addDoc(collection(db, 'sessions'), newSession);
@@ -216,27 +209,82 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  setFilter: (filter) => {
-    set({ filter });
-    const { sessions } = get();
-    const filteredSessions = sessions.filter(session => {
-      // Status filter
-      if (filter.status !== "all" && session.status !== filter.status) {
-        return false;
-      }
+  archiveSession: async (id) => {
+    try {
+      set({ isLoading: true, error: null });
+      await updateDoc(doc(db, 'sessions', id), {
+        archived: true,
+        archivedAt: serverTimestamp()
+      });
+      
+      set((state) => ({
+        sessions: state.sessions.map((session) =>
+          session.id === id 
+            ? { 
+                ...session, 
+                archived: true,
+                archivedAt: new Date().toISOString()
+              } 
+            : session
+        ),
+        isLoading: false,
+      }));
+    } catch (error) {
+      set({ error: (error as Error).message, isLoading: false });
+      throw error;
+    }
+  },
 
-      // Search filter
-      if (filter.search) {
-        const searchLower = filter.search.toLowerCase();
-        return (
-          session.title.toLowerCase().includes(searchLower) ||
-          session.description.toLowerCase().includes(searchLower) ||
-          session.code.toLowerCase().includes(searchLower)
-        );
-      }
-
-      return true;
-    });
-    set({ filteredSessions });
+  unarchiveSession: async (id) => {
+    try {
+      set({ isLoading: true, error: null });
+      await updateDoc(doc(db, 'sessions', id), {
+        archived: false,
+        archivedAt: null
+      });
+      
+      set((state) => ({
+        sessions: state.sessions.map((session) =>
+          session.id === id 
+            ? { 
+                ...session, 
+                archived: false,
+                archivedAt: undefined
+              } 
+            : session
+        ),
+        isLoading: false,
+      }));
+    } catch (error) {
+      set({ error: (error as Error).message, isLoading: false });
+      throw error;
+    }
   },
 }));
+
+// Helper function to apply filters
+function applyFilters(sessions: Session[], filter: FilterState): Session[] {
+  return sessions.filter(session => {
+    // First filter by archived status
+    if (!filter.showArchived && session.archived) {
+      return false;
+    }
+
+    // Then filter by status if not "all"
+    if (filter.status !== "all" && session.status !== filter.status) {
+      return false;
+    }
+
+    // Finally, apply search if present
+    if (filter.search) {
+      const searchLower = filter.search.toLowerCase();
+      return (
+        session.title.toLowerCase().includes(searchLower) ||
+        session.description.toLowerCase().includes(searchLower) ||
+        session.code.toLowerCase().includes(searchLower)
+      );
+    }
+
+    return true;
+  });
+}

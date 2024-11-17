@@ -19,12 +19,21 @@ import {
 } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 import { useSessionStore } from "@/store/session-store"
 import type { Session, Card as CardType, Category } from "@/types/session"
-import { ArrowLeft, Plus, X } from "lucide-react"
+import { ArrowLeft, Plus, X, FileUp } from "lucide-react"
 import Link from "next/link"
 
 interface SessionEditFormProps {
@@ -34,6 +43,8 @@ interface SessionEditFormProps {
 export function SessionEditForm({ session: initialSession }: SessionEditFormProps) {
   const [session, setSession] = useState(initialSession)
   const [isLoading, setIsLoading] = useState(false)
+  const [bulkCardsDialog, setBulkCardsDialog] = useState(false)
+  const [bulkCategoriesDialog, setBulkCategoriesDialog] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
   const { updateSession } = useSessionStore()
@@ -122,6 +133,37 @@ export function SessionEditForm({ session: initialSession }: SessionEditFormProp
     }
   }
 
+  const handleBulkCardImport = async (formData: FormData) => {
+    try {
+      setIsLoading(true)
+      const cardsText = formData.get("cards") as string
+      const newCards: CardType[] = cardsText
+        .split('\n')
+        .filter(text => text.trim())
+        .map(text => ({
+          id: crypto.randomUUID(),
+          text: text.trim()
+        }))
+
+      const updatedCards = [...session.cards, ...newCards]
+      await updateSession(session.id, { cards: updatedCards })
+      setSession(prev => ({ ...prev, cards: updatedCards }))
+      setBulkCardsDialog(false)
+      toast({
+        title: "Cards imported",
+        description: `Successfully added ${newCards.length} cards.`,
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to import cards.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const addCategory = async () => {
     const newCategory: Category = {
       id: crypto.randomUUID(),
@@ -176,6 +218,38 @@ export function SessionEditForm({ session: initialSession }: SessionEditFormProp
       toast({
         title: "Error",
         description: "Failed to delete category.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleBulkCategoryImport = async (formData: FormData) => {
+    try {
+      setIsLoading(true)
+      const categoriesText = formData.get("categories") as string
+      const newCategories: Category[] = categoriesText
+        .split('\n')
+        .filter(text => text.trim())
+        .map(text => ({
+          id: crypto.randomUUID(),
+          name: text.trim(),
+          cards: []
+        }))
+
+      const updatedCategories = [...session.categories, ...newCategories]
+      await updateSession(session.id, { categories: updatedCategories })
+      setSession(prev => ({ ...prev, categories: updatedCategories }))
+      setBulkCategoriesDialog(false)
+      toast({
+        title: "Categories imported",
+        description: `Successfully added ${newCategories.length} categories.`,
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to import categories.",
         variant: "destructive",
       })
     } finally {
@@ -240,11 +314,45 @@ export function SessionEditForm({ session: initialSession }: SessionEditFormProp
 
         <TabsContent value="cards" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Cards</CardTitle>
-              <CardDescription>
-                Manage the cards that participants will sort
-              </CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Cards</CardTitle>
+                <CardDescription>
+                  Manage the cards that participants will sort
+                </CardDescription>
+              </div>
+              <Dialog open={bulkCardsDialog} onOpenChange={setBulkCardsDialog}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">
+                    <FileUp className="h-4 w-4 mr-2" />
+                    Bulk Import
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <form action={handleBulkCardImport}>
+                    <DialogHeader>
+                      <DialogTitle>Import Cards</DialogTitle>
+                      <DialogDescription>
+                        Enter one card per line. All cards will be added to your existing set.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <Textarea
+                        name="cards"
+                        placeholder="Enter cards (one per line)..."
+                        className="min-h-[200px] font-mono"
+                        required
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setBulkCardsDialog(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit">Import Cards</Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
             </CardHeader>
             <CardContent className="space-y-4">
               {session.cards.map((card) => (
@@ -275,11 +383,45 @@ export function SessionEditForm({ session: initialSession }: SessionEditFormProp
 
         <TabsContent value="categories" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Categories</CardTitle>
-              <CardDescription>
-                Manage the categories available for sorting
-              </CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Categories</CardTitle>
+                <CardDescription>
+                  Manage the categories available for sorting
+                </CardDescription>
+              </div>
+              <Dialog open={bulkCategoriesDialog} onOpenChange={setBulkCategoriesDialog}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">
+                    <FileUp className="h-4 w-4 mr-2" />
+                    Bulk Import
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <form action={handleBulkCategoryImport}>
+                    <DialogHeader>
+                      <DialogTitle>Import Categories</DialogTitle>
+                      <DialogDescription>
+                        Enter one category per line. All categories will be added to your existing set.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <Textarea
+                        name="categories"
+                        placeholder="Enter categories (one per line)..."
+                        className="min-h-[200px] font-mono"
+                        required
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setBulkCategoriesDialog(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit">Import Categories</Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
             </CardHeader>
             <CardContent className="space-y-4">
               {session.categories.map((category) => (
